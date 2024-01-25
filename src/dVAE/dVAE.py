@@ -3,7 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning import LightningModule
 
-def loss_fun(recon_x, x, p, ALPHA=1.0):
+def loss_fun(recon_x, x, p, mask=None, ALPHA=1.0):
+    if mask is None:
+        mask = torch.ones(x.shape[0], x.shape[1])
+    
+    recon_x = recon_x[mask == 1]
+    x = x[mask == 1]
+    
     MSE = F.mse_loss(recon_x, x)
     
     log_p = F.log_softmax(p, dim=2)
@@ -66,12 +72,17 @@ class GenomedVAE(LightningModule):
         dec_layers.append(nn.Conv1d(dec_chans[-1], input_chan, kernel_size=3, padding=1))
         self.decoder = nn.Sequential(*dec_layers)
     
-    def forward(self, x):
+    def forward(self, x, mask=None):           
         if len(x.shape) == 2:   # for unbatched data
             x = x.unsqueeze(0)
             
+        if mask is None:
+            mask = torch.ones(x.shape[0], x.shape[1])   # if mask is not provided, mask out nothing.
+            
         x = x.permute(0, 2, 1) # (b, l, c) ----> (b, c, l)
         p = self.encoder(x)
+        
+        p = torch.einsum('bcl, bl -> bcl', p, mask) # mask out padding token
         
         one_hot = F.gumbel_softmax(p, tau=self.temperature, hard=self.straight_through, dim=1) # reparametrization trick
 
@@ -87,49 +98,63 @@ class GenomedVAE(LightningModule):
         
         sampled = torch.einsum('bcl, nd -> bdl', one_hot, self.codebook.weight) # convert one-hot vector into embedding vector
         
+        sampled = torch.einsum('bdl, bl -> bdl', sampled, mask) # mask out padding token
+        
         recon_x = self.decoder(sampled)
         
         return recon_x.permute(0, 2, 1), p.permute(0, 2, 1)
     
     @torch.no_grad()
-    def evaluate(self, x):
+    def evaluate(self, x, mask=None):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
+        
+        if mask is None:
+            mask = torch.ones(x.shape[0], x.shape[1])
             
         x = x.permute(0, 2, 1)
         p = self.encoder(x)
+        p = torch.einsum('bcl, bl -> bcl', p, mask) # mask out padding token
         
         one_hot = F.one_hot(p.argmax(dim=1), num_classes=self.num_tokens).float()   # (b, l, c)
         one_hot = one_hot.permute(0, 2, 1) # (b, l, c) ----> (b, c, l)
         sampled = torch.einsum('bcl, nd -> bdl', one_hot, self.codebook.weight)
         
+        sampled = torch.einsum('bdl, bl -> bdl', sampled, mask) # mask out padding token
+        
         recon_x = self.decoder(sampled)
         
         return recon_x.permute(0, 2, 1), p.permute(0, 2, 1)
     
-    def tokenize(self, x):
+    def tokenize(self, x, mask=None):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
+            
+        if mask is None:
+            mask = torch.ones(x.shape[0], x.shape[1])
             
         x = x.permute(0, 2, 1)
         x = self.encoder(x)
         
         tokens = x.argmax(dim=1)
         
+        tokens += 1 # shift index by 1 to avoid 0 index for padding token
+        tokens[mask == 0] = 0 # set padding token to 0
+        
         return tokens
     
     def training_step(self, batch, batch_idx):
-        x = batch
-        recon_x, p = self(x)
-        loss = loss_fun(recon_x, x, p, ALPHA=self.loss_alpha)
+        x, mask = batch['sentence'], batch['mask']
+        recon_x, p = self(x, mask)
+        loss = loss_fun(recon_x, x, p, mask, ALPHA=self.loss_alpha)
         self.log('train_loss', loss, sync_dist=True)
         
         return loss
     
     def validation_step(self, batch, batch_idx):
-        x = batch
-        recon_x, p = self.evaluate(x)
-        loss = loss_fun(recon_x, x, p, ALPHA=self.loss_alpha)
+        x, mask = batch['sentence'], batch['mask']
+        recon_x, p = self.evaluate(x, mask)
+        loss = loss_fun(recon_x, x, p, mask, ALPHA=self.loss_alpha)
         self.log('val_loss', loss, sync_dist=True)
         
         return loss
@@ -142,10 +167,23 @@ if __name__ == '__main__':
     model = GenomedVAE()
     print(model)
     x = torch.randn(4, 512, 320)
+    mask = torch.ones(4, 512)
+    mask[:, 100:] = 0
+    
+    # mask
+    y, z = model(x, mask)
+    y_eval, z_eval = model.evaluate(x, mask)
+    
+    embed_x  = model.tokenize(x, mask)
+    
+    mask_loss = loss_fun(y, x, z, mask)
+    
+    mask_val_loss = loss_fun(y_eval, x, z_eval, mask)
+    
+    # unmask
     y, z = model(x)
     y_eval, z_eval = model.evaluate(x)
-    
     embed_x  = model.tokenize(x)
-    
     loss = loss_fun(y, x, z)
     val_loss = loss_fun(y_eval, x, z_eval)
+    
