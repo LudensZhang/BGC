@@ -82,8 +82,6 @@ class GenomedVAE(LightningModule):
         x = x.permute(0, 2, 1) # (b, l, c) ----> (b, c, l)
         p = self.encoder(x)
         
-        p = torch.einsum('bcl, bl -> bcl', p, mask) # mask out padding token
-        
         one_hot = F.gumbel_softmax(p, tau=self.temperature, hard=self.straight_through, dim=1) # reparametrization trick
 
         if self.straight_through and self.reinmax:
@@ -114,7 +112,6 @@ class GenomedVAE(LightningModule):
             
         x = x.permute(0, 2, 1)
         p = self.encoder(x)
-        p = torch.einsum('bcl, bl -> bcl', p, mask) # mask out padding token
         
         one_hot = F.one_hot(p.argmax(dim=1), num_classes=self.num_tokens).float()   # (b, l, c)
         one_hot = one_hot.permute(0, 2, 1) # (b, l, c) ----> (b, c, l)
