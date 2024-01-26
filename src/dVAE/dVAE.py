@@ -72,9 +72,10 @@ class GenomedVAE(LightningModule):
         dec_layers.append(nn.Conv1d(dec_chans[-1], input_chan, kernel_size=3, padding=1))
         self.decoder = nn.Sequential(*dec_layers)
     
-    def forward(self, x, mask=None):           
+    def forward(self, x, mask=None):      
         if len(x.shape) == 2:   # for unbatched data
             x = x.unsqueeze(0)
+            mask = mask.unsqueeze(0)
             
         if mask is None:
             mask = torch.ones(x.shape[0], x.shape[1])   # if mask is not provided, mask out nothing.
@@ -96,6 +97,7 @@ class GenomedVAE(LightningModule):
         
         sampled = torch.einsum('bcl, nd -> bdl', one_hot, self.codebook.weight) # convert one-hot vector into embedding vector
         
+        print(sampled.shape, mask.shape)
         sampled = torch.einsum('bdl, bl -> bdl', sampled, mask) # mask out padding token
         
         recon_x = self.decoder(sampled)
@@ -106,6 +108,7 @@ class GenomedVAE(LightningModule):
     def evaluate(self, x, mask=None):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
+            mask = mask.unsqueeze(0)
         
         if mask is None:
             mask = torch.ones(x.shape[0], x.shape[1])
@@ -126,6 +129,7 @@ class GenomedVAE(LightningModule):
     def tokenize(self, x, mask=None):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
+            mask = mask.unsqueeze(0)
             
         if mask is None:
             mask = torch.ones(x.shape[0], x.shape[1])
