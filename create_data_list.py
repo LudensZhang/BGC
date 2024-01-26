@@ -8,6 +8,7 @@ import multiprocessing as mp
 
 LMDB_PATH = '/data4/yaoshuai/gtdb_reps_r214/protein_faa_reps/lmdb/'
 LOCUS_PATH = '/data4/yaoshuai/gtdb_reps_r214/protein_faa_reps/gene_name/txt'
+LMDB_PATH_ALL = '/data5/zhanghaohong/projects/BGC/data/gtdb_all_lmdb/'
 
 def truncate_and_pad(genome_file, max_len=512, sliding_window=256):
     """
@@ -61,11 +62,15 @@ train_files, val_files = train_test_split(locus_files, test_size=0.01, random_st
 # train_df = pool.map(truncate_and_pad, tqdm(train_files))
 train_df = [truncate_and_pad(i) for i in tqdm(train_files)]
 train_df = pd.concat(train_df).reindex()
-train_df['sentence'] = train_df['sentence'].apply(lambda x: ' '.join(x))    # convert list to stringm
+train_df['sentence'] = train_df['sentence'].apply(lambda x: ' '.join(x))    # convert list to string
+train_df['lmdb path'] = [LMDB_PATH_ALL] * len(train_df) # replace lmdb path with merged lmdb file
 train_df.to_csv('train.csv', index=False)
+train_df.iloc[:100].to_csv('train_100.csv', index=False)
 
 # val_df = pool.map(truncate_and_pad, tqdm(val_files))
 val_df = [truncate_and_pad(i) for i in tqdm(val_files)]
 val_df = pd.concat(val_df).reindex()
 val_df['sentence'] = val_df['sentence'].apply(lambda x: ' '.join(x))
+val_df['lmdb path'] = [LMDB_PATH_ALL] * len(val_df) # replace lmdb path with merged lmdb file
 val_df.to_csv('val.csv', index=False)
+val_df.iloc[:100].to_csv('val_100.csv', index=False)
