@@ -97,7 +97,6 @@ class GenomedVAE(LightningModule):
         
         sampled = torch.einsum('bcl, nd -> bdl', one_hot, self.codebook.weight) # convert one-hot vector into embedding vector
         
-        print(sampled.shape, mask.shape)
         sampled = torch.einsum('bdl, bl -> bdl', sampled, mask) # mask out padding token
         
         recon_x = self.decoder(sampled)
@@ -145,7 +144,7 @@ class GenomedVAE(LightningModule):
         return tokens
     
     def training_step(self, batch, batch_idx):
-        x, mask = batch['sentence'], batch['mask']
+        x, mask = batch['x'], batch['mask']
         recon_x, p = self(x, mask)
         loss = loss_fun(recon_x, x, p, mask, ALPHA=self.loss_alpha)
         self.log('train_loss', loss, sync_dist=True)
@@ -153,7 +152,7 @@ class GenomedVAE(LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
-        x, mask = batch['sentence'], batch['mask']
+        x, mask = batch['x'], batch['mask']
         recon_x, p = self.evaluate(x, mask)
         loss = loss_fun(recon_x, x, p, mask, ALPHA=self.loss_alpha)
         self.log('val_loss', loss, sync_dist=True)
