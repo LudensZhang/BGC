@@ -13,7 +13,11 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning import Trainer
+from prefetch_generator import BackgroundGenerator
 
+class DataLoaderX(DataLoader):  # DataLoaderX for faster reading speed.
+    def __iter__(self):
+        return BackgroundGenerator(super().__iter__())
 
 
 def main():
@@ -25,8 +29,8 @@ def main():
     train_data = load(open('data/train_data.pkl', 'rb'))
     val_data = load(open('data/val_data.pkl', 'rb'))
     
-    train_loader = DataLoader(train_data, batch_size=1024, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=1024, shuffle=True)
+    train_loader = DataLoaderX(train_data, batch_size=1024, shuffle=True)
+    val_loader = DataLoaderX(val_data, batch_size=1024, shuffle=True)
     model = GenomedVAE()
 
     trainer = dVAETrainer(model=model,
@@ -41,9 +45,8 @@ def main():
     trainer.train(train_loader, val_loader)
     
 def lightning_main():
-    train_data = load(open('data/train_data.pkl', 'rb'))
-    val_data = load(open('data/val_data.pkl', 'rb'))
-    
+    train_data = GenomedVAEDataset(csv_file='train.csv')
+    val_data = GenomedVAEDataset(csv_file='val.csv')
     
     train_loader = DataLoader(train_data, batch_size=1024, shuffle=True)
     val_loader = DataLoader(val_data, batch_size=1024)
