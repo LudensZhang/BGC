@@ -35,37 +35,43 @@ class GenomedVAEDataset(Dataset):
             return self.__getitem__legacy(idx)
         
         if isinstance(idx, int):
-            sentence = self.sentence[idx].split(' ')
+            sentence = np.array(self.sentence[idx].split(' '))
+            mask = torch.tensor(sentence != '<pad>').float()
             embed = [pickle.loads(self.txn.get(str(word).encode('ascii')))['mean_representations'][6] if word != '<pad>' else PAD_EMBEDDING for word in sentence]
             embed = torch.stack(embed)
-            return embed
+            return {'x': embed, 'mask': mask}
         
-        sentence = [i.split(' ') for i in self.sentence[idx]]
+        sentence = np.array([i.split(' ') for i in self.sentence[idx]])
         
         embeds = []
+        masks = []
+        
+        masks = torch.tensor(sentence != '<pad>').float()
         
         for sent in sentence:
+            mask = torch.tensor(sent != '<pad>').float()
+            
             embed = [pickle.loads(self.txn.get(str(word).encode('ascii')))['mean_representations'][6] if word != '<pad>' else PAD_EMBEDDING for word in sent]
             embed = torch.stack(embed)
             embeds.append(embed)
             
         embeds = torch.stack(embeds)
         
-        return embeds
-            
+        return {'x': embeds, 'mask': masks}          
     
     def __getitem__legacy(self, idx):
         if isinstance(idx, int):
-            sentence = self.sentence[idx].split(' ')
+            sentence = np.array(self.sentence[idx].split(' '))
+            mask = torch.tensor(sentence != '<pad>').float()
             lmdb_path = self.lmdb_path[idx]
             env = lmdb.open(lmdb_path, readonly=True, lock=False)   # lock=False for multi-process reading when using DataLoader
             with env.begin() as txn:
                 embed = [pickle.loads(txn.get(str(word).encode('ascii')))['mean_representations'][6] if word != '<pad>' else PAD_EMBEDDING for word in sentence]
                 embed = torch.stack(embed)
             
-            return embed
+            return {'x': embed, 'mask': mask}
             
-        sentence = [i.split(' ') for i in self.sentence[idx]]
+        sentence = [np.array(i.split(' ')) for i in self.sentence[idx]]
         lmdb_path = self.lmdb_path[idx]
         
         if self.max_workers:
@@ -73,24 +79,31 @@ class GenomedVAEDataset(Dataset):
                 futures = [executor.submit(self.__get_batch_embed_legacy, path, sent) for path, sent in zip(lmdb_path, sentence)]
                 embeds = [f.result() for f in futures]
                 
+            masks = [torch.tensor(sent != '<pad>').float() for sent in sentence]
+                
             embeds = torch.stack(embeds)
+            masks = torch.stack(masks)
             
-            return embeds
+            return {'x': embeds, 'mask': masks}
         
         embeds = []
+        masks = []
+        
         for i, path in enumerate(lmdb_path):
             env = lmdb.open(path, readonly=True, lock=False)
             with env.begin() as txn:
+                mask = torch.tensor(sentence[i] != '<pad>').float()
                 embed = [pickle.loads(txn.get(str(word).encode('ascii')))['mean_representations'][6] if word != '<pad>' else PAD_EMBEDDING for word in sentence[i]]
                 embed = torch.stack(embed)
                 embeds.append(embed)
+                masks.append(mask)
                     
         embeds = torch.stack(embeds)
         
         return embeds
 
     def __get_batch_embed_legacy(self, path, sentence):
-        env = lmdb.open(path, readonly=True)
+        env = lmdb.open(path, readonly=True, lock=False)
         with env.begin() as txn:
             embed = [pickle.loads(txn.get(str(word).encode('ascii')))['mean_representations'][6] if word != '<pad>' else PAD_EMBEDDING for word in sentence]
             embed = torch.stack(embed)
@@ -102,16 +115,26 @@ class GenomedVAEDataset(Dataset):
 if __name__ == '__main__':
     train_dataset = GenomedVAEDataset(csv_file='train_100.csv')
     model = GenomedVAE()
-    model(train_dataset[0])
-    model.tokenize(train_dataset[0:3])
+    model(**train_dataset[0])
+    model.tokenize(**train_dataset[0:3])
     
     # read time test
-    # import time
-    # train_dataset.lmdb_in_one = False
+    import time
+    start = time.time()
+    tmp = train_dataset[:]
+    end = time.time()
+    print(f'LMDB in one file, time: {end-start}')
     
-    # for workers in [None, 16, 32, 64]:
-    #     train_dataset.max_workers = workers
-    #     start = time.time()
-    #     tmp = train_dataset[:]
-    #     end = time.time()
-    #     print(f'workers: {workers}, time: {end-start}')
+    start = time.time()
+    tmp = [train_dataset[i] for i in range(len(train_dataset))]
+    end = time.time()
+    print(f'No batch, time: {end-start}')
+    
+    train_dataset.lmdb_in_one = False
+    
+    for workers in [None, 16, 32, 64]:
+        train_dataset.max_workers = workers
+        start = time.time()
+        tmp = train_dataset[:]
+        end = time.time()
+        print(f'workers: {workers}, time: {end-start}')
