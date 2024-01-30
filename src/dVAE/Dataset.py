@@ -8,7 +8,7 @@ import pickle
 from src.dVAE.dVAE import GenomedVAE
 from concurrent.futures import ThreadPoolExecutor
 
-PAD_EMBEDDING = torch.ones(320)
+PAD_EMBEDDING = torch.zeros(320)
 
 class GenomedVAEDataset(Dataset):
     def __init__(self, csv_file, lmdb_in_one=True, max_workers=64):
