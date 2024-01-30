@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning import LightningModule
 
-def loss_fun(recon_x, x, p, mask=None, ALPHA=1.0):
+def loss_fun(recon_x, x, p, mask=None, ALPHA=1):
     if mask is None:
         mask = torch.ones(x.shape[0], x.shape[1])
     
@@ -30,7 +30,7 @@ class GenomedVAE(LightningModule):
                  num_tokens=1024,
                  embedding_dim=64,
                  temperature=1.0,
-                 loss_alpha=1.0,
+                 loss_alpha=0,
                  straight_through=True,
                  reinmax=True):
         super(GenomedVAE, self).__init__()
@@ -55,6 +55,7 @@ class GenomedVAE(LightningModule):
         for in_chan, out_chan in zip(enc_chans[:-1], enc_chans[1:]):
             enc_layers.append(nn.Conv1d(in_chan, out_chan, kernel_size=3, padding=1))
             enc_layers.append(nn.ReLU())
+            enc_layers.append(nn.Dropout(0.5))
         
         enc_layers.append(nn.Conv1d(enc_chans[-1], num_tokens, kernel_size=3, padding=1))
         self.encoder = nn.Sequential(*enc_layers)
@@ -66,6 +67,7 @@ class GenomedVAE(LightningModule):
         for in_chan, out_chan in zip(dec_chans[:-1], dec_chans[1:]):
             dec_layers.append(nn.Conv1d(in_chan, out_chan, kernel_size=3, padding=1))
             dec_layers.append(nn.ReLU())
+            dec_layers.append(nn.Dropout(0.5))
         
         self.codebook = nn.Embedding(num_tokens, dec_chans[0])  # embedding layer converts one-hot vector into embedding vector
         
@@ -73,12 +75,12 @@ class GenomedVAE(LightningModule):
         self.decoder = nn.Sequential(*dec_layers)
     
     def forward(self, x, mask=None):      
+        if mask is None:
+            mask = torch.ones(x.shape[0], x.shape[1])   # if mask is not provided, mask out nothing.
+            
         if len(x.shape) == 2:   # for unbatched data
             x = x.unsqueeze(0)
             mask = mask.unsqueeze(0)
-            
-        if mask is None:
-            mask = torch.ones(x.shape[0], x.shape[1])   # if mask is not provided, mask out nothing.
             
         x = x.permute(0, 2, 1) # (b, l, c) ----> (b, c, l)
         p = self.encoder(x)
@@ -105,12 +107,12 @@ class GenomedVAE(LightningModule):
     
     @torch.no_grad()
     def evaluate(self, x, mask=None):
+        if mask is None:
+            mask = torch.ones(x.shape[0], x.shape[1])
+            
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
             mask = mask.unsqueeze(0)
-        
-        if mask is None:
-            mask = torch.ones(x.shape[0], x.shape[1])
             
         x = x.permute(0, 2, 1)
         p = self.encoder(x)
@@ -126,12 +128,12 @@ class GenomedVAE(LightningModule):
         return recon_x.permute(0, 2, 1), p.permute(0, 2, 1)
     
     def tokenize(self, x, mask=None):
+        if mask is None:
+            mask = torch.ones(x.shape[0], x.shape[1])
+            
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
             mask = mask.unsqueeze(0)
-            
-        if mask is None:
-            mask = torch.ones(x.shape[0], x.shape[1])
             
         x = x.permute(0, 2, 1)
         x = self.encoder(x)
