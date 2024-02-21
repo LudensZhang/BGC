@@ -10,7 +10,7 @@ LMDB_PATH = '/data4/yaoshuai/gtdb_reps_r214/protein_faa_reps/lmdb/'
 LOCUS_PATH = '/data4/yaoshuai/gtdb_reps_r214/protein_faa_reps/gene_name/txt'
 LMDB_PATH_ALL = '/data5/zhanghaohong/projects/BGC/data/gtdb_all_lmdb/'
 
-def truncate_and_pad(genome_file, max_len=512, stride=256):
+def truncate_and_pad(genome_file, max_len=512, stride=8):
     """
     Truncate locus using sliding window. If locus is shorter than max_len, pad it with '<pad>'
     """
