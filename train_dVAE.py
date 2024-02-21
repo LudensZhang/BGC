@@ -10,7 +10,7 @@ from src.dVAE.Trainer import dVAETrainer
 from src.dVAE.Dataset import GenomedVAEDataset
 from pickle import dump, load
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning import Trainer
 from prefetch_generator import BackgroundGenerator
@@ -47,23 +47,28 @@ def main():
 def lightning_main():
     train_data = GenomedVAEDataset(csv_file='train.csv')
     val_data = GenomedVAEDataset(csv_file='val.csv')
-    
-    train_loader = DataLoader(train_data, batch_size=1024, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=1024)
+        
+    train_loader = DataLoaderX(train_data, 
+                               batch_size=16, 
+                               shuffle=True)
+    val_loader = DataLoaderX(val_data, batch_size=128)
 
-    model = GenomedVAE()
+    model = GenomedVAE(num_tokens=2048, 
+                       hidden_dim=512,
+                       temperature=0.9)
     early_stopping = EarlyStopping('val_loss', patience=5)
+    checkpoint_callback = ModelCheckpoint(every_n_train_steps=50, save_top_k=-1)
     
     logger = CSVLogger('lightning_logs', name=f'dVAE_{model.num_tokens}')
     logger.log_hyperparams(model.hparams)
     trainer = Trainer(accelerator='auto',
-                      max_epochs=100, 
+                      max_epochs=1, 
                       logger=logger, 
-                      callbacks=[early_stopping], 
+                      callbacks=[checkpoint_callback, early_stopping],
                       val_check_interval=0.5,
                       log_every_n_steps=10)
     trainer.fit(model, train_loader, val_loader)
-    trainer.save_checkpoint(f'dVAE_model/dVAE_{model.num_tokens}.ckpt')
+    trainer.save_checkpoint(f'dVAE_model/dVAE_{model.num_tokens}_{model.temperature}.ckpt')
     
 def pre_exp():
     
@@ -82,7 +87,7 @@ def pre_exp():
     train_loader = DataLoader(train_data, batch_size=5, shuffle=True)
     val_loader = DataLoader(val_data, batch_size=5, shuffle=True)
     
-    model = GenomedVAE()
+    model = GenomedVAE(temperature=0.5)
     early_stopping = EarlyStopping('val_loss', patience=5)
     logger = CSVLogger('lightning_logs', name='dVAE_test')
     logger.log_hyperparams(model.hparams)
@@ -102,8 +107,32 @@ def pre_exp():
     y, z = model(x)
     y_eval, z_eval = model.evaluate(x)
     embed_x  = model.tokenize(x)
+    
+    
+def batch_size_select():
+    import panas as pd
+    import time
+    
+    train_data = GenomedVAEDataset(csv_file='train.csv')
+    
+    model = GenomedVAE()
+    
+    for batch_size in range(1, 1000, 10):
+        start = time.time()
+        batch = train_data[:batch_size]
+        end = time.time()
+        read_time = end - start
+        
+        start = time.time()
+        model.training_step(batch, 0)
+        end = time.time()
+        train_time = end - start
+        
+        print(f'batch_size: {batch_size}, read_time: {read_time}, train_time: {train_time}, read_time - train_time: {read_time - train_time}')
 
 if __name__ == '__main__':
     # main()
     lightning_main()
     # pre_exp()
+    
+    
