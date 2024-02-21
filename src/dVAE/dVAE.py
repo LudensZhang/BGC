@@ -28,8 +28,9 @@ class GenomedVAE(LightningModule):
                  num_layers=3,
                  hidden_dim=64,
                  num_tokens=1024,
-                 embedding_dim=64,
+                 embedding_dim=512,
                  temperature=1.0,
+                 dropout=0.5,
                  loss_alpha=0,
                  straight_through=True,
                  reinmax=True):
@@ -42,6 +43,7 @@ class GenomedVAE(LightningModule):
         self.num_tokens = num_tokens
         self.embedding_dim = embedding_dim
         self.temperature = temperature
+        self.dropout = dropout
         self.loss_alpha = loss_alpha
         
         self.straight_through = straight_through
@@ -55,7 +57,7 @@ class GenomedVAE(LightningModule):
         for in_chan, out_chan in zip(enc_chans[:-1], enc_chans[1:]):
             enc_layers.append(nn.Conv1d(in_chan, out_chan, kernel_size=3, padding=1))
             enc_layers.append(nn.ReLU())
-            enc_layers.append(nn.Dropout(0.5))
+            enc_layers.append(nn.Dropout(self.dropout))
         
         enc_layers.append(nn.Conv1d(enc_chans[-1], num_tokens, kernel_size=3, padding=1))
         self.encoder = nn.Sequential(*enc_layers)
@@ -67,7 +69,7 @@ class GenomedVAE(LightningModule):
         for in_chan, out_chan in zip(dec_chans[:-1], dec_chans[1:]):
             dec_layers.append(nn.Conv1d(in_chan, out_chan, kernel_size=3, padding=1))
             dec_layers.append(nn.ReLU())
-            dec_layers.append(nn.Dropout(0.5))
+            dec_layers.append(nn.Dropout(self.dropout))
         
         self.codebook = nn.Embedding(num_tokens, dec_chans[0])  # embedding layer converts one-hot vector into embedding vector
         
@@ -87,15 +89,15 @@ class GenomedVAE(LightningModule):
         
         one_hot = F.gumbel_softmax(p, tau=self.temperature, hard=self.straight_through, dim=1) # reparametrization trick
 
-        if self.straight_through and self.reinmax:
-            # use reinmax for better second-order accuracy - https://arxiv.org/abs/2304.08612
-            # algorithm 2
-            one_hot = one_hot.detach()
-            π0 = p.softmax(dim = 1)
-            π1 = (one_hot + (p / self.temperature).softmax(dim = 1)) / 2
-            π1 = ((log(π1) - p).detach() + p).softmax(dim = 1)
-            π2 = 2 * π1 - 0.5 * π0
-            one_hot = π2 - π2.detach() + one_hot
+        # if self.straight_through and self.reinmax:
+        #     # use reinmax for better second-order accuracy - https://arxiv.org/abs/2304.08612
+        #     # algorithm 2
+        #     one_hot = one_hot.detach()
+        #     π0 = p.softmax(dim = 1)
+        #     π1 = (one_hot + (p / self.temperature).softmax(dim = 1)) / 2
+        #     π1 = ((log(π1) - p).detach() + p).softmax(dim = 1)
+        #     π2 = 2 * π1 - 0.5 * π0
+        #     one_hot = π2 - π2.detach() + one_hot
         
         sampled = torch.einsum('bcl, nd -> bdl', one_hot, self.codebook.weight) # convert one-hot vector into embedding vector
         
@@ -162,7 +164,9 @@ class GenomedVAE(LightningModule):
         return loss
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-5)       
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-5)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+        return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'train_loss'}
                  
 
 if __name__ == '__main__':
